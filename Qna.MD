@@ -1,5 +1,8 @@
 **something I think we will need**
-WHat are Null Terminators:
+
+
+
+What are Null Terminators:
 
 In C, strings are represented as arrays of characters that end with a special character called the **null terminator** (`'\0'`). Here’s why it’s important and why we subtract 1 from `SHM_SIZE`:
 
