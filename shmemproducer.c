@@ -25,7 +25,6 @@ int main() {
     }
 
     // attach the shared memory segment
-
     if ((shmaddr = shmat(shmid, NULL, 0)) == (char *) -1) {
         perror("shmat");
         exit(1);
