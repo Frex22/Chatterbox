@@ -27,6 +27,15 @@ typedef struct {
     time_t timestamp;
 } Message;
 
+/* Log buffer structure */
+typedef struct {
+    size_t total_size;
+    size_t used_size;
+    int write_position;
+    pthread_mutex_t mutex;
+    char data[];
+} LogBuffer;
+
 /* Global variables */
 int server_queue_id;
 int client_queue_id;
@@ -131,6 +140,7 @@ int initialize_client(const char *user) {
     connect_msg.mtype = MSG_TYPE_CONNECT;
     strncpy(connect_msg.username, username, MAX_USERNAME - 1);
     connect_msg.username[MAX_USERNAME - 1] = '\0'; /* Ensure null termination */
+    sprintf(connect_msg.content, "%d %d", client_queue_id, getpid());
     connect_msg.timestamp = time(NULL);
     if (msgsnd(server_queue_id, &connect_msg, sizeof(Message) - sizeof(long), 0) == -1) {
         perror("msgsnd connect");
@@ -144,7 +154,22 @@ int initialize_client(const char *user) {
 void cleanup_resources() {
     /* TODO: Implement cleanup logic */
     /* - Send disconnect message */
+    if (server_queue_id != -1) // checks if server queue is valid
+    { 
+        Message disconnect_msg;
+        disconnect_msg.mtype = MSG_TYPE_DISCONNECT;
+        strcpy(disconnect_msg.username, username);
+        strcpy(disconnect_msg.content, "");
+        disconnect_msg.timestamp = time(NULL);
+
+        msgsnd(server_queue_id, &disconnect_msg, sizeof(Message) - sizeof(long),0);
+    }
     /* - Remove message queue */
+    if (client_queue_id != -1) {
+        msgctl(client_queue_id, IPC_RMID, NULL);
+    }
+
+    printf("Disconnected from server\n");
 }
 
 /* Thread to receive incoming messages */
@@ -209,11 +234,11 @@ void send_message(const char *content) {
     Message chat_msg;
     chat_msg.mtype = MSG_TYPE_CHAT;
     strncpy(chat_msg.username, username, MAX_USERNAME - 1);
-    strcpy(chat_msg.content, content, MSG_SIZE);
+    strncpy(chat_msg.content, content, MSG_SIZE);
     chat_msg.timestamp = time(NULL);
 
     /* - Send to server queue */
-    if (msgsend(server_queue_id, &chat_msg, sizeof(Message)- sizeof(long), 0) == -1) {
+    if (msgsnd(server_queue_id, &chat_msg, sizeof(Message)- sizeof(long), 0) == -1) {
         perror("msgsnd chat");
     }
 }
@@ -240,11 +265,14 @@ void view_logs() {
     }
     /* - Read logs from shared memory */
     LogBuffer *log_buffer = (LogBuffer *)shm_addr;
-    if(log_buffer == (void *)-1){
-        perror("shmat logs");
-        return;
-    }
+    
+    pthread_mutex_lock(&log_buffer->mutex);
     /* - Display logs to user */
+    printf("======Chat logs:=========\n");
+    write(STDOUT_FILENO, log_buffer->data, log_buffer->used_size);
+    printf("=========================\n");
+    pthread_mutex_unlock(&log_buffer->mutex);
+    shmdt(shm_addr);
 }
 
 /* Signal handler */

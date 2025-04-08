@@ -5,10 +5,10 @@ LDFLAGS = -lrt -pthread
 all: server client
 
 server: chat_server.c
-	$(CC)$(CFLAGS) -o chat_server chat_server.c $(LDFLAGS)
+	$(CC) $(CFLAGS) -o chat_server chat_server.c $(LDFLAGS)
 
 client: chat_client.c
-	$(CC)$(CFLAGS) -o chat_client chat_client.c $(LDFLAGS)
+	$(CC) $(CFLAGS) -o chat_client chat_client.c $(LDFLAGS)
 
 clean:
 	rm -f chat_server chat_client *.o

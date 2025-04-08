@@ -352,7 +352,7 @@ void handle_message(Message *msg) {
             }
             
             /* Broadcast message to all other clients */
-            broadcast_message(msg, -1);  /* Send to all clients */
+            broadcast_message(msg, client_index);  /* Send to all clients */
             
             /* Add message to log */
             add_to_log(msg);
