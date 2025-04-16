@@ -57,8 +57,6 @@ int server_queue_id;
 LogBuffer *log_buffer;
 int shm_id;
 int running = 1;
-pthread_t receiver_tid, log_sync_tid;
-
 
 /* Function prototypes */
 void initialize_server();
@@ -71,24 +69,18 @@ void add_to_log(Message *msg);
 void *message_receiver(void *arg);
 void *log_sync_thread(void *arg);
 void handle_signal(int sig);
-//CHANGE New fun added
-void handle_alarm(int sig);
-void force_server_shutdown();
 
 int main() {
-    printf("Starting chat server V2...\n");
+    printf("Starting chat server...\n");
     
     /* Set up signal handler */
     signal(SIGINT, handle_signal);
-
-    //CHANGE adding alarm sig handler
-
-    signal(SIGALRM, handle_alarm);
     
     /* Initialize server resources */
     initialize_server();
     
     /* Start message receiver thread */
+    pthread_t receiver_tid;
     if (pthread_create(&receiver_tid, NULL, message_receiver, NULL) != 0) {
         perror("Failed to create message receiver thread");
         cleanup_resources();
@@ -96,6 +88,7 @@ int main() {
     }
     
     /* Start log synchronization thread */
+    pthread_t log_sync_tid;
     if (pthread_create(&log_sync_tid, NULL, log_sync_thread, NULL) != 0) {
         perror("Failed to create log sync thread");
         running = 0;
@@ -112,14 +105,9 @@ int main() {
             break;
         }
         
-        command[strcspn(command, "\n")] = 0;  /* Remove newline character */
-
         /* Process server commands here if needed */
         if (strncmp(command, "quit", 4) == 0) {
-            printf("Shutting down server...\n");
             running = 0;
-            //CHANGE
-            force_server_shutdown();
         } else if (strncmp(command, "list", 4) == 0) {
             /* List connected clients */
             printf("Connected clients:\n");
@@ -156,8 +144,6 @@ void initialize_server() {
         exit(1);
     }
     
-    msgctl(msgget(server_key, 0666), IPC_RMID, NULL);  // Remove existing queue if any
-
     server_queue_id = msgget(server_key, 0666 | IPC_CREAT);
     if (server_queue_id == -1) {
         perror("msgget server queue");
@@ -170,8 +156,6 @@ void initialize_server() {
         perror("ftok shm key");
         exit(1);
     }
-
-    shmctl(shmget( shm_key, 0, 0666), IPC_RMID, NULL);
     
     shm_id = shmget(shm_key, sizeof(LogBuffer) + LOG_SIZE, IPC_CREAT | 0666);
     if (shm_id == -1) {
@@ -201,34 +185,13 @@ void initialize_server() {
     printf("Server initialized successfully\n");
 }
 
-//DEFINING FORCE SERVER SHUT DOWN
-void force_server_shutdown(){
-    printf("Forcefully shutting down server...\n");
-    /*First attempt to wakeup receiver thread*/
-    Message wake_msg;
-    wake_msg.mtype = 999; // Arbitrary type to wake up receiver because it is blocked in msgrcv
-    strcpy(wake_msg.username, "SERVER");
-    strcpy(wake_msg.content, "Server is shutting down");
-    msgsnd(server_queue_id, &wake_msg, sizeof(Message) - sizeof(long), IPC_NOWAIT);
-    struct timespec ts;
-    ts.tv_sec = 0;
-    ts.tv_nsec = 0;
-
-    /*set alaram as fallback*/
-    alarm(5);
-
-    /* Wait for receiver thread to finish */
-    printf("Waiting for receiver thread to finish...\n");
-    
-}
-
-void handle_alarm(int sig) {
-    printf("Alarm triggered, shutting down...\n");
-    exit(1);
-}
-
 /* Clean up server resources */
-void cleanup_resources() {    
+void cleanup_resources() {
+    /* Close and remove message queues */
+    if (server_queue_id != -1) {
+        msgctl(server_queue_id, IPC_RMID, NULL);
+    }
+    
     /* Notify clients about server shutdown */
     Message shutdown_msg;
     shutdown_msg.mtype = MSG_TYPE_DISCONNECT;
@@ -238,16 +201,10 @@ void cleanup_resources() {
     
     for (int i = 0; i < MAX_CLIENTS; i++) {
         if (clients[i].active) {
-            msgsnd(clients[i].queue_id, &shutdown_msg, sizeof(Message) - sizeof(long), IPC_NOWAIT); //changed to non blocking send check IPC_NOWAIT definition for more details
+            msgsnd(clients[i].queue_id, &shutdown_msg, sizeof(Message) - sizeof(long), 0);
         }
     }
     
-    usleep(500000);
-
-    if (server_queue_id != -1) {
-        msgctl(server_queue_id, IPC_RMID, NULL);
-    }
-
     /* Destroy mutex and detach from shared memory */
     if (log_buffer != (void *)-1) {
         pthread_mutex_destroy(&log_buffer->mutex);
@@ -353,14 +310,8 @@ void broadcast_message(Message *msg, int exclude_index) {
     for (int i = 0; i < MAX_CLIENTS; i++) {
         /* Send message to each active client except exclude_index */
         if (clients[i].active && i != exclude_index) {
-            /*changed to non blocking */
-            if (msgsnd(clients[i].queue_id, msg, sizeof(Message) - sizeof(long), IPC_NOWAIT) == -1) {
-                if (errno == EINVAL || errno == EIDRM) {
-                    printf("Client %s disconnected, removing from list\n", clients[i].username);
-                    clients[i].active = CLIENT_INACTIVE;  /* Mark as inactive */
-                } else {
+            if (msgsnd(clients[i].queue_id, msg, sizeof(Message) - sizeof(long), 0) == -1) {
                 perror("msgsnd broadcast");
-             }
             }
         }
     }
@@ -376,33 +327,10 @@ void handle_message(Message *msg) {
             /* Extract client queue ID from content (assuming it's stored there) */
             int client_queue_id;
             pid_t client_pid;
-            /*validation of message format*/
-
-           if (sscanf(msg->content, "%d %d", &client_queue_id, &client_pid) != 2){
-                printf("Invalid connect message format from %s\n", msg->username);
-                return;  /* Invalid format */
-            }
-            
-            /* Check if client is already connected */
-            for (int i = 0; i < MAX_CLIENTS; i++) {
-                if (clients[i].active && strcmp(clients[i].username, msg->username) == 0) {
-                    printf("Client %s is already connected\n", msg->username);
-                    return;  /* Already connected */
-                }
-           }
+            sscanf(msg->content, "%d %d", &client_queue_id, &client_pid);
             
             /* Add the client */
-            int result = add_client(msg->username, client_queue_id, client_pid);
-            if(result == -1) {
-                printf("Failed to add client %s, no slots available or username taken\n", msg->username);
-                Message error_msg;
-                error_msg.mtype = MSG_TYPE_ACK;
-                strcpy(error_msg.username, "SERVER");
-                sprintf(error_msg.content, "Failed to connect: No slots available or username taken.");
-                error_msg.timestamp = time(NULL);
-                
-                msgsnd(client_queue_id, &error_msg, sizeof(Message) - sizeof(long), 0);
-            }
+            add_client(msg->username, client_queue_id, client_pid);
             break;
         }
         
@@ -452,11 +380,8 @@ void add_to_log(Message *msg) {
     /* Check if we need to wrap around (circular buffer) */
     if (log_buffer->used_size + len > log_buffer->total_size) {
         /* Simple approach: clear the buffer if it's full */
-        /*CHANGE Improved Circular buffer*/
-        size_t half_size = log_buffer->total_size /2;
-        memmove(log_buffer->data, log_buffer->data + half_size, log_buffer->used_size - half_size);
-        log_buffer->used_size -= half_size;
-        log_buffer->write_position = log_buffer->used_size;
+        log_buffer->used_size = 0;
+        log_buffer->write_position = 0;
     }
     
     /* Copy log entry to buffer */
@@ -472,32 +397,17 @@ void *message_receiver(void *arg) {
     Message msg;
     
     while (running) {
-        ssize_t result = msgrcv(server_queue_id, &msg, sizeof(Message) - sizeof(long), 0, IPC_NOWAIT);
-        
-        if (result == -1) {
-            if (errno == ENOMSG) {
-                /* No message available, sleep a bit and check running flag */
-                usleep(100000);  /* 100ms */
-                continue;
-            } else if (errno == EINTR) {
+        /* Receive message from server queue */
+        if (msgrcv(server_queue_id, &msg, sizeof(Message) - sizeof(long), 0, 0) == -1) {
+            if (errno == EINTR) {
                 continue;  /* Interrupted by signal */
-            } else {
-                perror("msgrcv");
-                if (!running) break;  /* Exit if we're shutting down */
-                usleep(100000);  /* Wait a bit before trying again */
-                continue;
             }
-        } else {
-            // CHANGE: Added handling for special shutdown message
-            if (msg.mtype == 999) {
-                if (!running) break;  /* Exit if we're shutting down */
-                continue;
-            }
-            
-            /* Process the message */
-            handle_message(&msg);
+            perror("msgrcv");
+            break;
         }
-       
+        
+        /* Process the message */
+        handle_message(&msg);
     }
     
     return NULL;
@@ -508,18 +418,13 @@ void *log_sync_thread(void *arg) {
     FILE *log_file = NULL;
     
     while (running) {
-        if (!running) break;
         /* Open log file for appending */
         log_file = fopen("chat_server.log", "a");
         if (!log_file) {
             perror("Failed to open log file");
-            //CHANGE /* Try again after delay */
-            for(int i=0; i<10 && running; i++){
-                usleep(100000);  /* 100ms */
-            }
+            sleep(10);  /* Try again after delay */
             continue;
         }
-        
         
         /* Lock the mutex to access log buffer */
         pthread_mutex_lock(&log_buffer->mutex);
@@ -527,22 +432,21 @@ void *log_sync_thread(void *arg) {
         /* Write logs to file */
         if (log_buffer->used_size > 0) {
             fwrite(log_buffer->data, 1, log_buffer->used_size, log_file);
-            //CHANGE
-            fflush(log_file);
-            /* Dont Clear the buffer after writing */
-            //log_buffer->used_size = 0;
-            //log_buffer->write_position = 0;
+            
+            /* Clear the buffer after writing */
+            log_buffer->used_size = 0;
+            log_buffer->write_position = 0;
         }
         
         pthread_mutex_unlock(&log_buffer->mutex);
         
         /* Close the file */
         fclose(log_file);
-        for (int i = 0; i<10 && running; i++){
-            usleep(500000);
-        }
+        
+        /* Sleep for a while before next sync */
+        sleep(5);
     }
-    printf("Log sync thread exiting...\n");
+    
     return NULL;
 }
 
@@ -550,7 +454,4 @@ void *log_sync_thread(void *arg) {
 void handle_signal(int sig) {
     printf("\nReceived signal %d, shutting down...\n", sig);
     running = 0;
-
-    //CHANGE
-    force_server_shutdown();
 }
