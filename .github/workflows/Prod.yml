@@ -1,0 +1,120 @@
+name: ChatterBox CI/CD
+
+on:
+  push:
+    branches: [ code-review ]
+  pull_request:
+    branches: [ code-review ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+      
+    - name: Set up build environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential gcc make
+    
+    - name: Compile source code
+      run: |
+        make all
+      
+    - name: Compile tests
+      run: |
+        gcc -Wall -g -pthread -o test_chat_sys test_chat_sys.c -lrt
+      
+    - name: Run tests
+      run: |
+        ./test_chat_sys
+    
+    - name: Static code analysis
+      run: |
+        sudo apt-get install -y cppcheck
+        cppcheck --enable=all --suppress=missingIncludeSystem .
+    
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: chat-binaries
+        path: |
+          chat_server
+          chat_client
+          
+  memory-leak-test:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Valgrind
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y valgrind
+    
+    - name: Compile with debug symbols
+      run: |
+        make clean
+        make CFLAGS="-Wall -g -pthread" all
+    
+    - name: Test server for memory leaks
+      run: |
+        # Run server in background and analyze with Valgrind
+        timeout 5s valgrind --leak-check=full --error-exitcode=1 ./chat_server || true
+    
+    - name: Test client for memory leaks
+      run: |
+        # Run client with Valgrind
+        timeout 5s valgrind --leak-check=full --error-exitcode=1 ./chat_client test_user || true
+        
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [build-and-test, memory-leak-test]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up build environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential gcc make
+    
+    - name: Build release binaries
+      run: |
+        make clean
+        make CFLAGS="-O2 -Wall -pthread" all
+    
+    - name: Create release package
+      run: |
+        mkdir -p release
+        cp chat_server chat_client README.md release/
+        tar -czvf chatterbox.tar.gz release/
+    
+    - name: Create GitHub Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ github.run_number }}
+        release_name: Release v${{ github.run_number }}
+        body: |
+          ChatterBox Release v${{ github.run_number }}
+          
+          Automated release from CI/CD pipeline.
+        draft: false
+        prerelease: false
+    
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./chatterbox.tar.gz
+        asset_name: chatterbox.tar.gz
+        asset_content_type: application/gzip
