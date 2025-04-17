@@ -28,7 +28,7 @@ jobs:
       
     - name: Run tests
       run: |
-        ./test_chat_system
+        ./test_chat_sys
     
     - name: Static code analysis
       run: |
