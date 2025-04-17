@@ -41,6 +41,7 @@ int server_queue_id;
 int client_queue_id;
 char username[MAX_USERNAME];
 int running = 1;
+pthread_t receiver_tid; /* Thread ID for message receiver */
 
 /* Function prototypes */
 int initialize_client(const char *user);
@@ -50,6 +51,8 @@ void send_message(const char *content);
 void view_logs();
 void handle_signal(int sig);
 
+void handle_usr1(int sig); // Signal handler for SIGUSR1
+
 int main(int argc, char *argv[]) {
     if (argc < 2) {
         printf("Usage: %s <username>\n", argv[0]);
@@ -58,6 +61,8 @@ int main(int argc, char *argv[]) {
     
     /* Set up signal handler */
     signal(SIGINT, handle_signal);
+    //CHANGE added signal handler for SIGUSR1
+    signal(SIGUSR1, handle_usr1);
     
     /* Initialize client */
     if (initialize_client(argv[1]) != 0) {
@@ -65,7 +70,6 @@ int main(int argc, char *argv[]) {
     }
     
     /* Start message receiver thread */
-    pthread_t receiver_tid;
     if (pthread_create(&receiver_tid, NULL, message_receiver, NULL) != 0) {
         perror("Failed to create message receiver thread");
         cleanup_resources();
@@ -74,6 +78,9 @@ int main(int argc, char *argv[]) {
     
     /* Main loop for sending messages */
     char buffer[MSG_SIZE];
+    printf("You: ");
+    fflush(stdout);
+
     while (running) {
         if (fgets(buffer, sizeof(buffer), stdin) == NULL) {
             break;
@@ -81,15 +88,27 @@ int main(int argc, char *argv[]) {
         
         /* Remove newline */
         buffer[strcspn(buffer, "\n")] = '\0';
-        
-        /* Check for commands */
-        if (strcmp(buffer, "/quit") == 0) {
+        //CHANGE
+         // CHANGE: Accept commands with or without slash
+         if (strcmp(buffer, "/quit") == 0 || strcmp(buffer, "quit") == 0) {
+            printf("Exiting...\n");
             running = 0;
-        } else if (strcmp(buffer, "/logs") == 0) {
+            
+            // CHANGE: Send signal to wake up message receiver thread
+            pthread_kill(receiver_tid, SIGUSR1);
+            
+            // CHANGE: Break out of the loop immediately
+            break;
+        } else if (strcmp(buffer, "/logs") == 0 || strcmp(buffer, "logs") == 0) {
             view_logs();
+            printf("You: ");
+            fflush(stdout);
         } else {
             send_message(buffer);
+            printf("You: ");
+            fflush(stdout);
         }
+       
     }
     
     /* Wait for receiver thread to finish */
@@ -154,7 +173,9 @@ int initialize_client(const char *user) {
 void cleanup_resources() {
     /* TODO: Implement cleanup logic */
     /* - Send disconnect message */
-    if (server_queue_id != -1) // checks if server queue is valid
+    /*improving this function*/
+    printf("Cleaning up resources...\n");
+    if (server_queue_id != -1 && running) // checks if server queue is valid
     { 
         Message disconnect_msg;
         disconnect_msg.mtype = MSG_TYPE_DISCONNECT;
@@ -162,15 +183,23 @@ void cleanup_resources() {
         strcpy(disconnect_msg.content, "");
         disconnect_msg.timestamp = time(NULL);
 
-        msgsnd(server_queue_id, &disconnect_msg, sizeof(Message) - sizeof(long),0);
+        //adding non blocking send
+        msgsnd(server_queue_id, &disconnect_msg, sizeof(Message) - sizeof(long), IPC_NOWAIT);
     }
     /* - Remove message queue */
+    /*adding wakeup mechanim to unblock server thread*/
     if (client_queue_id != -1) {
+        Message  wakeup_msg;
+        wakeup_msg.mtype = 999; // arbitrary type to wake up server
+        msgsnd(client_queue_id, &wakeup_msg, sizeof(Message) - sizeof(long), IPC_NOWAIT);
+        usleep(100000);
+
         msgctl(client_queue_id, IPC_RMID, NULL);
     }
 
     printf("Disconnected from server\n");
 }
+
 
 /* Thread to receive incoming messages */
 void *message_receiver(void *arg) {
@@ -182,14 +211,28 @@ void *message_receiver(void *arg) {
     printf("Message receiver thread started\n");
     while (running) {
         /*Receive message from client queue*/
-        bytes_received = msgrcv(client_queue_id, &received_msg, sizeof(Message) - sizeof(long), 0, 0);
-        if(bytes_received == -1) {
-            if (errno == EINTR) {
-                continue;
-            }
+        /*changing from blocking to non blockinf w timeout*/
 
+        bytes_received = msgrcv(client_queue_id, &received_msg, sizeof(Message) - sizeof(long), 0, IPC_NOWAIT);
+        if(bytes_received == -1) {
+            if (errno == ENOMSG) {
+                usleep(100000); // Sleep for 100ms
+                continue;
+            } else if (errno == EINTR) {
+                continue;
+            } else if (errno == EIDRM || errno == EINVAL) {
+                printf("Message queue removed or invalid\n");
+                break;
+            } else{
             perror("msgrcv");
-            break;
+            continue; //CHANGE: Continue instead of breaking 
+            }
+        }
+
+        //CHANGE
+        if (received_msg.mtype == 999) {
+            printf("Received wakeup signal, exiting...\n");
+            continue; // Ignore this message
         }
 
         /* Format timestamp */
@@ -211,12 +254,16 @@ void *message_receiver(void *arg) {
                     printf("\n[%s] [%s] %s\n", timestamp_str, received_msg.username, received_msg.content);
                 }
                 break;
+            /*CHANGE: Added case for disconnect message*/
+            case MSG_TYPE_DISCONNECT:
+                printf("\n[%s] Server is shutting down. Disconnecting...\n", timestamp_str);
+                running = 0;  /* Set running to false to exit main loop */
+                return NULL;  /* Exit thread immediately */
+                
             default:
-                printf("Unknown message type: %ld\n", received_msg.mtype);
-                break;
-
-        }
-
+                printf("\nUnknown message type: %ld\n", received_msg.mtype);
+                break;           
+        }       
         printf("You:");
         fflush(stdout); // Ensure prompt is displayed immediately
     
@@ -234,12 +281,21 @@ void send_message(const char *content) {
     Message chat_msg;
     chat_msg.mtype = MSG_TYPE_CHAT;
     strncpy(chat_msg.username, username, MAX_USERNAME - 1);
-    strncpy(chat_msg.content, content, MSG_SIZE);
+    chat_msg.username[MAX_USERNAME - 1] = '\0'; /* Ensure null termination */
+
+    strncpy(chat_msg.content, content, MSG_SIZE - 1);
+    chat_msg.content[MSG_SIZE - 1] = '\0'; /* Ensure null termination */
     chat_msg.timestamp = time(NULL);
 
     /* - Send to server queue */
     if (msgsnd(server_queue_id, &chat_msg, sizeof(Message)- sizeof(long), 0) == -1) {
-        perror("msgsnd chat");
+        if (errno == EINVAL || errno == EIDRM) {
+            printf("Server queue removed or invalid\n");
+            running = 0; // Set running to false to exit main loop
+            pthread_kill (receiver_tid, SIGUSR1); // Wake up receiver thread
+        } else {
+            perror("msgsnd chat");
+        }
     }
 }
 
@@ -265,18 +321,39 @@ void view_logs() {
     }
     /* - Read logs from shared memory */
     LogBuffer *log_buffer = (LogBuffer *)shm_addr;
+
+    //CHANGE
+    printf("Log buffer info: total_size=%zu, used_size=%zu, write_position=%d\n", 
+        log_buffer->total_size, log_buffer->used_size, log_buffer->write_position);
     
-    pthread_mutex_lock(&log_buffer->mutex);
-    /* - Display logs to user */
-    printf("======Chat logs:=========\n");
-    write(STDOUT_FILENO, log_buffer->data, log_buffer->used_size);
-    printf("=========================\n");
-    pthread_mutex_unlock(&log_buffer->mutex);
+        if (log_buffer->used_size > 0) {
+            printf("\n===== CHAT LOGS =====\n");
+            
+            // CHANGE: Added safety bounds check
+            size_t safe_size = (log_buffer->used_size <= log_buffer->total_size) ? 
+                               log_buffer->used_size : log_buffer->total_size;
+            
+            if (write(STDOUT_FILENO, log_buffer->data, safe_size) == -1) {
+                perror("Failed to write logs");
+            }
+            
+            printf("\n====================\n");
+        } else {
+            printf("No logs available\n");
+        }  
     shmdt(shm_addr);
 }
+
 
 /* Signal handler */
 void handle_signal(int sig) {
     printf("\nReceived signal %d, disconnecting...\n", sig);
     running = 0;
+
+    //change added wakeup mechanism to unblock server thread
+    pthread_kill(receiver_tid, SIGUSR1);
+}
+
+void handle_usr1(int sig) {
+
 }
