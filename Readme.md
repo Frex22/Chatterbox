@@ -26,9 +26,8 @@ ChatterBox is a terminal-based multi-user chat application built using System V 
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/chatterbox.git
-cd chatterbox
-
+git clone https://github.com/Frex22/OS-Project-DAK.git
+cd OS-Project-DAK
 # Build the server and client
 make all
 ```
@@ -62,13 +61,14 @@ Once connected, you can:
 - Type `logs` to view chat history
 - Type `quit` to disconnect
 
-## 🎮 Fun Features
+## 🎮  Features
 
 - 👥 Connect with multiple users simultaneously
 - 📜 View chat history even if you just joined
 - 🔔 Real-time message delivery
 - ⏱️ Timestamps on all messages
 - 🔐 System handles crashes gracefully
+- 🌐 Distributed architecture that can run across multiple machines
 
 ## 🏗️ Architecture
 
@@ -141,22 +141,17 @@ Building this chat system demonstrates several important concepts:
 - How multi-threading can improve application responsiveness
 - Techniques for robust error handling and recovery
 
-## 🎯 Challenge Ideas
+## 📚 References
 
-Want to extend ChatterBox? Try these challenges:
-1. Add private messaging between users
-2. Implement file transfer capabilities
-3. Add encryption for secure communication
-4. Create a GUI frontend using a toolkit like GTK
-5. Implement user authentication
-
-## 📚 Further Reading
-
-Interested in the concepts behind ChatterBox? Check out:
 - [POSIX Threads Programming](https://computing.llnl.gov/tutorials/pthreads/)
 - [System V IPC Mechanisms](https://tldp.org/LDP/lpg/node7.html)
 - [Linux Shared Memory](https://www.geeksforgeeks.org/ipc-shared-memory/)
 
+## Personell
+Implemnted coded and created by
+Aakash: Ideation, Threads, Client logic
+Dev: Server, Syncronization, Cleanup Procedures
+Kush: Server, Shared Memory
 ---
 
 Created with 💖 for Operating Systems enthusiasts everywhere!
