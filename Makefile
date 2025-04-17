@@ -2,7 +2,7 @@ CC = gcc
 CFLAGS = -Wall -g -pthread
 LDFLAGS = -lrt -pthread
 
-all: server client
+all: server client test_sys
 
 server: chat_server.c
 	$(CC) $(CFLAGS) -o chat_server chat_server.c $(LDFLAGS)
@@ -10,10 +10,53 @@ server: chat_server.c
 client: chat_client.c
 	$(CC) $(CFLAGS) -o chat_client chat_client.c $(LDFLAGS)
 
-clean:
-	rm -f chat_server chat_client *.o
+test_sys: test_chat_sys.c
+	$(CC) $(CFLAGS) -o test_chat_sys test_chat_sys.c $(LDFLAGS)
 
-.PHONY: all clean
+clean:
+	rm -f chat_server chat_client test_chat_sys *.o
+
+# RUN TESTS
+run_test: test_sys
+	./test_chat_sys
+
+# MEMORY LEAK CHECK WITH VALGRIND
+memcheck: chat_server chat_client
+	valgrind --leak-check=full ./chat_server & \
+	SERVER_PID=$$!; \
+	sleep 2; \
+	valgrind --leak-check=full ./chat_client testuser; \
+	kill $$SERVER_PID
+
+# Run the server with default settings
+run-server: chat_server
+	./chat_server
+
+# Create IPC key files if they don't exist
+setup:
+	touch server.key client.key log.key test_queue.key test_shm.key
+
+# Full cleanup including IPC resources
+fullclean: clean
+	ipcs -q | grep $(USER) | awk '{print $$2}' | xargs -r ipcrm -q
+	ipcs -m | grep $(USER) | awk '{print $$2}' | xargs -r ipcrm -m
+	rm -f chat_server.log
+
+# Help target
+help:
+	@echo "Available targets:"
+	@echo "  all          - Build server, client and tests"
+	@echo "  server       - Build only the server"
+	@echo "  client       - Build only the client"
+	@echo "  test_sys     - Build the test file"
+	@echo "  run_test     - Run the test suite"
+	@echo "  memcheck     - Check for memory leaks with Valgrind"
+	@echo "  clean        - Remove built files"
+	@echo "  fullclean    - Remove built files and clean up IPC resources"
+	@echo "  setup        - Create necessary key files"
+	@echo "  run-server   - Run the chat server"
+
+.PHONY: all clean run_test memcheck run-server setup fullclean help test_sys
 
 
 # This Makefile is used to compile the chat server and client programs.
