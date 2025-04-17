@@ -149,9 +149,10 @@ Building this chat system demonstrates several important concepts:
 
 ## Personell
 Implemnted coded and created by
-Aakash: Ideation, Threads, Client logic
-Dev: Server, Syncronization, Cleanup Procedures
-Kush: Server, Shared Memory
+
+- Aakash: Ideation, Threads, Client logic
+- Dev: Server, Syncronization, Cleanup Procedures
+- Kush: Server, Shared Memory
 ---
 
 Created with 💖 for Operating Systems enthusiasts everywhere!
