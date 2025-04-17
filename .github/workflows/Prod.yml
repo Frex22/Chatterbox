@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       
     - name: Set up build environment
       run: |
@@ -36,7 +36,7 @@ jobs:
         cppcheck --enable=all --suppress=missingIncludeSystem .
     
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: chat-binaries
         path: |
@@ -48,7 +48,7 @@ jobs:
     needs: build-and-test
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Set up Valgrind
       run: |
@@ -76,7 +76,7 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Set up build environment
       run: |
