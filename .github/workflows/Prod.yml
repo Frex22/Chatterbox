@@ -24,7 +24,7 @@ jobs:
       
     - name: Compile tests
       run: |
-        gcc -Wall -g -pthread -o test_chat_system test_chat_system.c -lrt
+        gcc -Wall -g -pthread -o test_chat_sys test_chat_sys.c -lrt
       
     - name: Run tests
       run: |
