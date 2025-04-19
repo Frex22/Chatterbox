@@ -530,8 +530,8 @@ void *log_sync_thread(void *arg) {
             //CHANGE
             fflush(log_file);
             /* Dont Clear the buffer after writing */
-            //log_buffer->used_size = 0;
-            //log_buffer->write_position = 0;
+            log_buffer->used_size = 0;
+            log_buffer->write_position = 0;
         }
         
         pthread_mutex_unlock(&log_buffer->mutex);
