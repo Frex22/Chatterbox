@@ -2,9 +2,9 @@ name: ChatterBox CI/CD
 
 on:
   push:
-    branches: [ code-review ]
+    branches: [ main ]
   pull_request:
-    branches: [ code-review ]
+    branches: [ main ]
 
 jobs:
   build-and-test:
@@ -118,3 +118,4 @@ jobs:
         asset_path: ./chatterbox.tar.gz
         asset_name: chatterbox.tar.gz
         asset_content_type: application/gzip
+
