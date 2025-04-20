@@ -7,8 +7,6 @@
 As the architect on the ChatterBox project, I was responsible for conceptualizing the entire system and designing its core architecture. My initial vision focused on creating a distributed, reliable chat system that would showcase fundamental OS concepts:
 
 - **Proposed the Multi-tier Architecture**: Designed the separation between client and server components with distinct responsibilities
-- **Defined IPC Protocol**: Created the message-type based protocol (connect, disconnect, chat, acknowledgment) enabling seamless communication
-- **Designed Buffer Management**: Conceived the circular buffer approach for log management in shared memory
 - **Established Thread Model**: Architected the threading model for concurrent message handling
 
 ### 2. Complete Client Implementation (`chat_client.c`)
