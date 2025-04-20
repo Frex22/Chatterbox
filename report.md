@@ -344,7 +344,7 @@ Based on insights gained during implementation, I've identified several opportun
 
 ## Conclusion
 
-My contributions to ChatterBox focused on creating a robust, user-friendly client implementation with proper resource management and threading. The client component successfully:
+My and my Team's contributions to ChatterBox focused on creating a robust, user-friendly client implementation with proper resource management and threading. The client component successfully:
 
 - Establishes reliable communication through System V message queues
 - Handles user input and server messages concurrently
